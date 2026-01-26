@@ -22,6 +22,7 @@ class MusicPlayer:
         self.next = asyncio.Event()
         self.voice = None
         self.current = None
+        self.volume = 0.5
 
         bot.loop.create_task(self.player_loop())
 
@@ -31,7 +32,7 @@ class MusicPlayer:
             self.current = await self.queue.get()
 
             self.voice.play(
-                self.current,
+                discord.PCMVolumeTransformer(self.current, volume=self.volume),
                 after=lambda _: self.bot.loop.call_soon_threadsafe(self.next.set),
             )
 

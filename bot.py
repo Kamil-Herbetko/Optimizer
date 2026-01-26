@@ -84,4 +84,24 @@ async def auto_disconnect():
             await vc.disconnect()
 
 
+@bot.tree.command(name="volume")
+async def volume(interaction: discord.Interaction, level: int):
+    """
+    Set playback volume (0–200)
+    """
+    if level < 0 or level > 200:
+        return await interaction.response.send_message(
+            "Volume must be between 0 and 200"
+        )
+
+    player = get_player(interaction.guild)
+    player.volume = level / 100
+
+    vc = interaction.guild.voice_client
+    if vc and vc.source:
+        vc.source.volume = player.volume
+
+    await interaction.response.send_message(f"🔊 Volume set to {level}%")
+
+
 bot.run(os.getenv("DISCORD_TOKEN"))
