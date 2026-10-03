@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import discord
 import yt_dlp
 
@@ -23,23 +24,47 @@ class MusicPlayer:
         self.voice = None
         self.current = None
         self.volume = 0.5
+        self.generation = 0
 
         bot.loop.create_task(self.player_loop())
 
     async def player_loop(self):
         while True:
             self.next.clear()
-            self.current = await self.queue.get()
+            query, repeat = await self.queue.get()
+            generation = self.generation
+            try:
+                # FFmpeg sources are consumed and cleaned up after playback.
+                # Resolve a fresh source on every pass through the queue.
+                source, _ = await yt_source(query)
+                if generation != self.generation or not self.voice or not self.voice.is_connected():
+                    source.cleanup()
+                    continue
+                self.current = source
+                self.voice.play(
+                    discord.PCMVolumeTransformer(source, volume=self.volume),
+                    after=lambda _: self.bot.loop.call_soon_threadsafe(self.next.set),
+                )
+                await self.next.wait()
+                if repeat and generation == self.generation:
+                    self.queue.put_nowait((query, repeat))
+            except Exception:
+                logging.exception("Could not play %s", query)
+            finally:
+                self.current = None
+                self.queue.task_done()
 
-            self.voice.play(
-                discord.PCMVolumeTransformer(self.current, volume=self.volume),
-                after=lambda _: self.bot.loop.call_soon_threadsafe(self.next.set),
-            )
+    async def add(self, queries, loop=False):
+        for query in queries:
+            self.queue.put_nowait((query, loop))
 
-            await self.next.wait()
-
-    async def add(self, source):
-        await self.queue.put(source)
+    def stop(self):
+        self.generation += 1
+        while not self.queue.empty():
+            self.queue.get_nowait()
+            self.queue.task_done()
+        if self.voice:
+            self.voice.stop()
 
 
 async def yt_source(query: str):
