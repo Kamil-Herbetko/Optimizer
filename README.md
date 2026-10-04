@@ -65,3 +65,15 @@ exclude `cookies*.txt`; store differently named cookie files outside this repo.
 If authentication still fails, export fresh cookies and rebuild with
 `docker build --no-cache -t optimizer .` to refresh yt-dlp. YouTube may also
 block the server's IP, so cookies cannot guarantee access.
+
+## Audio stream 403 errors
+
+The bot checks candidate formats with yt-dlp before playback and passes the
+selected stream's HTTP headers and URL-scoped cookies to FFmpeg. This avoids
+losing the request context when moving from extraction to playback. Rebuild
+the image and recreate the container after updating the bot.
+
+If 403 errors persist, test yt-dlp on the same host/container and with the same
+cookies. YouTube can reject streams because of IP/session restrictions or
+[PO token requirements](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide).
+Passing headers cannot fix those server-side restrictions.

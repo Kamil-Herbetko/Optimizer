@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import shlex
 from pathlib import Path
 import discord
 import yt_dlp
@@ -9,6 +10,7 @@ YDL_OPTIONS = {
     "format": "bestaudio/best",
     "quiet": True,
     "noplaylist": True,
+    "check_formats": True,
 }
 
 FFMPEG_OPTIONS = {
@@ -34,6 +36,19 @@ def ydl_options():
         options["extractor_args"] = {
             "youtube": {"player_client": ["default", "web_embedded"]},
         }
+    return options
+
+
+def ffmpeg_options(headers):
+    options = FFMPEG_OPTIONS.copy()
+    if headers:
+        # discord.py splits this string with shlex before spawning FFmpeg.
+        # Quote the entire header block so spaces and quotes remain intact.
+        for key, value in headers.items():
+            if any(char in str(key) + str(value) for char in "\r\n"):
+                raise ValueError("Invalid newline in stream HTTP headers.")
+        block = "".join(f"{key}: {value}\r\n" for key, value in headers.items())
+        options["before_options"] += " " + shlex.join(["-headers", block])
     return options
 
 
@@ -96,7 +111,15 @@ async def yt_source(query: str):
         try:
             with yt_dlp.YoutubeDL(ydl_options()) as ydl:
                 info = ydl.extract_info(f"ytsearch:{query}", download=False)["entries"][0]
-                return info["url"], info["title"]
+                headers = dict(info.get("http_headers") or {})
+                # yt-dlp removes Cookie from http_headers to prevent leaks.
+                # Only send cookies matching the actual media URL, never the
+                # full YouTube login cookie jar to another domain.
+                headers = {key: value for key, value in headers.items() if key.lower() != "cookie"}
+                cookie = ydl.cookiejar.get_cookie_header(info["url"])
+                if cookie:
+                    headers["Cookie"] = cookie
+                return info["url"], info["title"], headers
         except yt_dlp.utils.DownloadError as error:
             if "The page needs to be reloaded" in str(error):
                 raise RuntimeError(
@@ -116,5 +139,5 @@ async def yt_source(query: str):
                 ) from error
             raise
 
-    url, title = await loop.run_in_executor(None, extract)
-    return discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS), title
+    url, title, headers = await loop.run_in_executor(None, extract)
+    return discord.FFmpegPCMAudio(url, **ffmpeg_options(headers)), title

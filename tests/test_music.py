@@ -1,10 +1,11 @@
 import asyncio
 import unittest
 import tempfile
+import shlex
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from music import MusicPlayer, ydl_options, yt_source
+from music import FFMPEG_OPTIONS, MusicPlayer, ffmpeg_options, ydl_options, yt_source
 
 
 class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
@@ -16,6 +17,7 @@ class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
                 ydl.return_value.__enter__.return_value.extract_info.return_value = {
                     "entries": [{"url": "https://example.com/audio", "title": "Song"}]
                 }
+                ydl.return_value.__enter__.return_value.cookiejar.get_cookie_header.return_value = None
                 source, title = await yt_source("song")
                 self.assertEqual(ydl.call_args.args[0]["cookiefile"], cookies.name)
                 self.assertEqual(
@@ -32,6 +34,7 @@ class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
             ydl.return_value.__enter__.return_value.extract_info.return_value = {
                 "entries": [{"url": "https://example.com/audio", "title": "Song"}]
             }
+            ydl.return_value.__enter__.return_value.cookiejar.get_cookie_header.return_value = None
             await yt_source("song")
             self.assertEqual(ydl.call_args.args[0]["cookiesfrombrowser"], ("firefox",))
             self.assertIn("web_embedded", ydl.call_args.args[0]["extractor_args"]["youtube"]["player_client"])
@@ -39,6 +42,35 @@ class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
     def test_anonymous_requests_keep_default_clients(self):
         with patch.dict("os.environ", {}, clear=True):
             self.assertNotIn("extractor_args", ydl_options())
+
+    async def test_ffmpeg_receives_stream_headers_and_only_scoped_cookies(self):
+        with patch.dict("os.environ", {}, clear=True), \
+                patch("music.yt_dlp.YoutubeDL") as ydl, \
+                patch("music.discord.FFmpegPCMAudio") as audio:
+            extractor = ydl.return_value.__enter__.return_value
+            extractor.extract_info.return_value = {"entries": [{
+                "url": "https://example.com/audio", "title": "Song",
+                "http_headers": {"User-Agent": 'Browser "quoted" agent',
+                                 "Referer": "https://www.youtube.com/", "Cookie": "unscoped=secret"},
+            }]}
+            extractor.cookiejar.get_cookie_header.return_value = "media=session"
+            await yt_source("song")
+            extractor.cookiejar.get_cookie_header.assert_called_once_with("https://example.com/audio")
+            self.assertTrue(ydl.call_args.args[0]["check_formats"])
+            args = shlex.split(audio.call_args.kwargs["before_options"])
+            block = args[args.index("-headers") + 1]
+            self.assertIn('User-Agent: Browser "quoted" agent\r\n', block)
+            self.assertIn("Referer: https://www.youtube.com/\r\n", block)
+            self.assertIn("Cookie: media=session\r\n", block)
+            self.assertNotIn("unscoped", block)
+            self.assertEqual(audio.call_args.args[0], "https://example.com/audio")
+
+    def test_no_headers_keeps_reconnect_options(self):
+        self.assertEqual(ffmpeg_options({}), FFMPEG_OPTIONS)
+
+    def test_headers_cannot_inject_newlines(self):
+        with self.assertRaisesRegex(ValueError, "newline"):
+            ffmpeg_options({"User-Agent": "browser\r\nInjected: value"})
 
     async def test_reload_failure_has_update_instructions_without_retrying(self):
         import yt_dlp
