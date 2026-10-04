@@ -1,9 +1,56 @@
 import asyncio
 import unittest
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from music import MusicPlayer
+from music import MusicPlayer, yt_source
+
+
+class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cookie_file_is_passed_to_extractor(self):
+        with tempfile.NamedTemporaryFile(suffix=".txt") as cookies:
+            with patch.dict("os.environ", {"YTDLP_COOKIE_FILE": cookies.name}, clear=True), \
+                    patch("music.yt_dlp.YoutubeDL") as ydl, \
+                    patch("music.discord.FFmpegPCMAudio") as audio:
+                ydl.return_value.__enter__.return_value.extract_info.return_value = {
+                    "entries": [{"url": "https://example.com/audio", "title": "Song"}]
+                }
+                source, title = await yt_source("song")
+                self.assertEqual(ydl.call_args.args[0]["cookiefile"], cookies.name)
+                self.assertIs(source, audio.return_value)
+                self.assertEqual(title, "Song")
+
+    async def test_browser_cookies_are_passed_to_extractor(self):
+        with patch.dict("os.environ", {"YTDLP_COOKIES_FROM_BROWSER": "firefox"}, clear=True), \
+                patch("music.yt_dlp.YoutubeDL") as ydl, \
+                patch("music.discord.FFmpegPCMAudio"):
+            ydl.return_value.__enter__.return_value.extract_info.return_value = {
+                "entries": [{"url": "https://example.com/audio", "title": "Song"}]
+            }
+            await yt_source("song")
+            self.assertEqual(ydl.call_args.args[0]["cookiesfrombrowser"], ("firefox",))
+
+    async def test_missing_cookie_file_fails_before_extraction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict("os.environ", {"YTDLP_COOKIE_FILE": f"{directory}/missing.txt"}, clear=True), \
+                    patch("music.yt_dlp.YoutubeDL") as ydl:
+                with self.assertRaisesRegex(ValueError, "YTDLP_COOKIE_FILE"):
+                    await yt_source("song")
+                ydl.assert_not_called()
+
+    async def test_bot_challenge_explains_authentication_setup(self):
+        import yt_dlp
+
+        with patch.dict("os.environ", {}, clear=True), \
+                patch("music.yt_dlp.YoutubeDL") as ydl, \
+                patch("music.discord.FFmpegPCMAudio") as audio:
+            ydl.return_value.__enter__.return_value.extract_info.side_effect = (
+                yt_dlp.utils.DownloadError("Sign in to confirm you’re not a bot")
+            )
+            with self.assertRaisesRegex(RuntimeError, "YTDLP_COOKIE_FILE"):
+                await yt_source("song")
+            audio.assert_not_called()
 
 
 class Voice:
