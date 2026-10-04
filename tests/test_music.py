@@ -56,7 +56,7 @@ class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
             extractor.cookiejar.get_cookie_header.return_value = "media=session"
             await yt_source("song")
             extractor.cookiejar.get_cookie_header.assert_called_once_with("https://example.com/audio")
-            self.assertTrue(ydl.call_args.args[0]["check_formats"])
+            self.assertEqual(ydl.call_args.args[0]["check_formats"], "selected")
             args = shlex.split(audio.call_args.kwargs["before_options"])
             block = args[args.index("-headers") + 1]
             self.assertIn('User-Agent: Browser "quoted" agent\r\n', block)
@@ -67,6 +67,30 @@ class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
 
     def test_no_headers_keeps_reconnect_options(self):
         self.assertEqual(ffmpeg_options({}), FFMPEG_OPTIONS)
+
+    def test_format_checks_stop_at_first_working_audio(self):
+        import yt_dlp
+
+        formats = [
+            {"format_id": "low-audio", "vcodec": "none", "acodec": "opus"},
+            {"format_id": "good-audio", "vcodec": "none", "acodec": "opus"},
+            {"format_id": "blocked-audio", "vcodec": "none", "acodec": "opus"},
+            {"format_id": "video", "vcodec": "av1", "acodec": "none"},
+        ]
+        checked = []
+
+        def check(candidates):
+            for candidate in candidates:
+                checked.append(candidate["format_id"])
+                if candidate["format_id"] != "blocked-audio":
+                    yield candidate
+
+        with patch.dict("os.environ", {}, clear=True):
+            with yt_dlp.YoutubeDL(ydl_options()) as ydl:
+                with patch.object(ydl, "_check_formats", side_effect=check):
+                    selected = ydl._select_formats(formats, ydl.build_format_selector(ydl.params["format"]))
+        self.assertEqual([item["format_id"] for item in selected], ["good-audio"])
+        self.assertEqual(checked, ["blocked-audio", "good-audio"])
 
     def test_headers_cannot_inject_newlines(self):
         with self.assertRaisesRegex(ValueError, "newline"):

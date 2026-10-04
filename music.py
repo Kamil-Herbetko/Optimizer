@@ -10,7 +10,8 @@ YDL_OPTIONS = {
     "format": "bestaudio/best",
     "quiet": True,
     "noplaylist": True,
-    "check_formats": True,
+    # Probe only candidates needed by the audio selector, not every video format.
+    "check_formats": "selected",
 }
 
 FFMPEG_OPTIONS = {

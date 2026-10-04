@@ -68,7 +68,8 @@ block the server's IP, so cookies cannot guarantee access.
 
 ## Audio stream 403 errors
 
-The bot checks candidate formats with yt-dlp before playback and passes the
+The bot checks audio candidates with yt-dlp until it finds a working format,
+instead of probing every available audio and video format. It passes the
 selected stream's HTTP headers and URL-scoped cookies to FFmpeg. This avoids
 losing the request context when moving from extraction to playback. Rebuild
 the image and recreate the container after updating the bot.
