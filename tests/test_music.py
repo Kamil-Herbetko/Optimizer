@@ -4,7 +4,7 @@ import tempfile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from music import MusicPlayer, yt_source
+from music import MusicPlayer, ydl_options, yt_source
 
 
 class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
@@ -18,6 +18,10 @@ class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
                 }
                 source, title = await yt_source("song")
                 self.assertEqual(ydl.call_args.args[0]["cookiefile"], cookies.name)
+                self.assertEqual(
+                    ydl.call_args.args[0]["extractor_args"]["youtube"]["player_client"],
+                    ["default", "web_embedded"],
+                )
                 self.assertIs(source, audio.return_value)
                 self.assertEqual(title, "Song")
 
@@ -30,6 +34,24 @@ class YouTubeSourceTests(unittest.IsolatedAsyncioTestCase):
             }
             await yt_source("song")
             self.assertEqual(ydl.call_args.args[0]["cookiesfrombrowser"], ("firefox",))
+            self.assertIn("web_embedded", ydl.call_args.args[0]["extractor_args"]["youtube"]["player_client"])
+
+    def test_anonymous_requests_keep_default_clients(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertNotIn("extractor_args", ydl_options())
+
+    async def test_reload_failure_has_update_instructions_without_retrying(self):
+        import yt_dlp
+
+        with patch.dict("os.environ", {}, clear=True), \
+                patch("music.yt_dlp.YoutubeDL") as ydl, \
+                patch("music.discord.FFmpegPCMAudio") as audio:
+            extract = ydl.return_value.__enter__.return_value.extract_info
+            extract.side_effect = yt_dlp.utils.DownloadError("The page needs to be reloaded.")
+            with self.assertRaisesRegex(RuntimeError, "embedded-client workaround"):
+                await yt_source("song")
+            extract.assert_called_once()
+            audio.assert_not_called()
 
     async def test_missing_cookie_file_fails_before_extraction(self):
         with tempfile.TemporaryDirectory() as directory:

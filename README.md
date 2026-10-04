@@ -17,6 +17,22 @@ For example: `/play query:Never Gonna Give You Up loop:true` or
 
 ## YouTube authentication
 
+The Python dependencies include Deno and yt-dlp's default extras (including
+the EJS challenge solver) for YouTube's JavaScript challenges. Install or update
+them locally with `uv sync --upgrade-package yt-dlp`, then run `uv run bot.py`
+so Deno is on the bot's PATH. Docker installs these dependencies automatically.
+
+For cookie-authenticated requests, the bot adds the `web_embedded` player client
+alongside yt-dlp's defaults to work around the known
+[“The page needs to be reloaded” issue](https://github.com/yt-dlp/yt-dlp/issues/17389).
+If you already have a Docker image, rebuild it and recreate the container:
+
+```sh
+docker build --no-cache -t optimizer .
+```
+
+Then use the `docker run` command below with your existing cookie file.
+
 If YouTube says “Sign in to confirm you’re not a bot”, the bot needs cookies
 from a browser session that can play the video. Export YouTube cookies in
 Mozilla/Netscape format following the

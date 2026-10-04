@@ -28,6 +28,12 @@ def ydl_options():
         options["cookiefile"] = str(path)
     elif browser:
         options["cookiesfrombrowser"] = (browser,)
+    if cookie_file or browser:
+        # The default logged-in TV client can return "The page needs to be
+        # reloaded". Keep defaults and add the upstream-recommended client.
+        options["extractor_args"] = {
+            "youtube": {"player_client": ["default", "web_embedded"]},
+        }
     return options
 
 
@@ -92,6 +98,14 @@ async def yt_source(query: str):
                 info = ydl.extract_info(f"ytsearch:{query}", download=False)["entries"][0]
                 return info["url"], info["title"]
         except yt_dlp.utils.DownloadError as error:
+            if "The page needs to be reloaded" in str(error):
+                raise RuntimeError(
+                    "YouTube rejected the player request. Cookie-authenticated requests "
+                    "include the embedded-client workaround. Update yt-dlp and its "
+                    "JavaScript dependencies (uv sync "
+                    "--upgrade-package yt-dlp; in Docker rebuild with --no-cache), "
+                    "then refresh your YouTube cookies if needed. See README.md."
+                ) from error
             if "Sign in to confirm" in str(error):
                 raise RuntimeError(
                     "YouTube requires authentication. Export fresh YouTube cookies in "
